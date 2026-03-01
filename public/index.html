@@ -68,6 +68,17 @@
       td.actions {
         width: 140px;
       }
+      td.actions button {
+        margin-right: 4px;
+        margin-bottom: 4px;
+      }
+      .edit-input {
+        padding: 6px;
+        font-size: inherit;
+        font-family: inherit;
+        width: 100%;
+        box-sizing: border-box;
+      }
       .muted {
         color: #666;
         font-size: 12px;
@@ -158,10 +169,25 @@
           <div class="muted">updated: ${esc(t.updated_at)}</div>
         </td>
         <td class="actions">
+          <button data-act="edit" data-id="${esc(t.id)}" data-content="${esc(t.content)}" data-due="${esc(t.due_date || "")}">編集</button>
           <button data-act="archive" data-id="${esc(t.id)}">アーカイブ</button>
         </td>`;
           listEl.appendChild(tr);
         }
+      }
+
+      function startEdit(tr, id, currentContent, currentDue) {
+        const dueTd = tr.querySelector("td.due");
+        const contentTd = tr.querySelectorAll("td")[1];
+        const actionsTd = tr.querySelector("td.actions");
+
+        dueTd.innerHTML = `<input type="date" class="edit-input" value="${esc(currentDue)}" />`;
+        contentTd.innerHTML = `<input type="text" class="edit-input" value="${esc(currentContent)}" />`;
+        actionsTd.innerHTML =
+          `<button data-act="save" data-id="${esc(id)}">保存</button>` +
+          `<button data-act="cancel">キャンセル</button>`;
+
+        contentTd.querySelector("input").focus();
       }
 
       async function load() {
@@ -200,18 +226,57 @@
 
       listEl.addEventListener("click", async (ev) => {
         const btn = ev.target.closest("button");
-        if (!btn || btn.getAttribute("data-act") !== "archive") return;
+        if (!btn) return;
+        const act = btn.getAttribute("data-act");
         const id = btn.getAttribute("data-id");
+        const tr = btn.closest("tr");
 
-        btn.disabled = true;
-        setErr("");
-        try {
-          await api(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+        if (act === "edit") {
+          startEdit(tr, id, btn.getAttribute("data-content"), btn.getAttribute("data-due"));
+          return;
+        }
+
+        if (act === "cancel") {
           await load();
-        } catch (e) {
-          setErr(e.message);
-        } finally {
-          btn.disabled = false;
+          return;
+        }
+
+        if (act === "save") {
+          const dueInput = tr.querySelector("td.due input");
+          const contentInput = tr.querySelectorAll("td")[1].querySelector("input");
+          const newContent = contentInput.value.trim();
+          if (!newContent) {
+            setErr("内容を入力してください");
+            return;
+          }
+
+          btn.disabled = true;
+          setErr("");
+          try {
+            await api(`/api/tasks/${encodeURIComponent(id)}`, {
+              method: "PATCH",
+              body: JSON.stringify({ content: newContent, due_date: dueInput.value }),
+            });
+            await load();
+          } catch (e) {
+            setErr(e.message);
+          } finally {
+            btn.disabled = false;
+          }
+          return;
+        }
+
+        if (act === "archive") {
+          btn.disabled = true;
+          setErr("");
+          try {
+            await api(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+            await load();
+          } catch (e) {
+            setErr(e.message);
+          } finally {
+            btn.disabled = false;
+          }
         }
       });
 
