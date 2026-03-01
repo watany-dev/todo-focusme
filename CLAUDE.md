@@ -14,6 +14,8 @@ Stack: Hono + Cloudflare Pages Functions + D1 (SQLite) + Vanilla JS frontend.
 - `public/` - Static HTML/JS frontend (served by Cloudflare Pages)
 - `migrations/` - D1 SQL migration files
 - `test/` - Unit tests (Vitest + cloudflare vitest pool workers)
+- `e2e/` - E2E tests (Playwright)
+- `docs/design/` - Design documents (設計書)
 
 ## Common Commands
 
@@ -62,7 +64,7 @@ Cloudflare のエッジインフラだけで動く、ほぼ無料の個人用 To
 - **最小依存**: Hono + Cloudflare Workers Types のみに依存し、軽量で高速な実装を維持
 - **エッジファースト**: 全処理を Cloudflare Edge で完結。Node.js API は使用不可
 - **テスト品質**: カバレッジ95%以上を維持。D1 はモック、E2E は Playwright でテスト
-- **段階的リリース**: 基本 CRUD → アーカイブ → インライン編集 → 通知等を段階的に対応
+- **段階的リリース**: 基本 CRUD → アーカイブ → インライン編集・復元（実装済み） → 通知等を段階的に対応
 
 ## Code Conventions
 
