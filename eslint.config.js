@@ -38,6 +38,14 @@ export default tseslint.config(
     },
   },
   {
+    files: ["test/**/*.ts", "e2e/**/*.ts"],
+    rules: {
+      "@typescript-eslint/explicit-function-return-type": "off",
+      "@typescript-eslint/no-unsafe-assignment": "off",
+      "@typescript-eslint/no-unsafe-member-access": "off",
+    },
+  },
+  {
     files: ["*.config.ts", "*.config.js", "*.config.mjs"],
     ...tseslint.configs.disableTypeChecked,
   },

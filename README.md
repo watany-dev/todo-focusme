@@ -17,9 +17,10 @@ Cloudflare だけで動く個人用 Todo アプリ。ほぼ無料・認証あり
 │  │  Cloudflare Pages                          │ │
 │  │                                            │ │
 │  │  public/          Hono (Functions)         │ │
-│  │  ├─ index.html    ├─ GET  /api/tasks      │ │
-│  │  └─ archive.html  ├─ POST /api/tasks      │ │
-│  │    (静的配信)      ├─ PATCH /api/tasks/:id │ │
+│  │  ├─ index.html    ├─ GET  /api/health     │ │
+│  │  └─ archive.html  ├─ GET  /api/tasks      │ │
+│  │    (静的配信)      ├─ POST /api/tasks      │ │
+│  │                   ├─ PATCH /api/tasks/:id │ │
 │  │                   ├─ DELETE /api/tasks/:id │ │
 │  │                   └─ GET  /api/archive     │ │
 │  └──────────────────────┬─────────────────────┘ │
@@ -62,6 +63,9 @@ todo-focusme/
 ├── public/
 │   ├── index.html           # タスク一覧 UI
 │   └── archive.html         # アーカイブ一覧 UI
+├── test/
+│   ├── app.test.ts          # Vitest ユニットテスト
+│   └── env.d.ts             # cloudflare:test 型定義
 ├── migrations/
 │   └── 0001_init.sql        # D1 スキーマ
 ├── wrangler.toml
@@ -112,7 +116,7 @@ npm run dev
 
 `http://localhost:8788` でアクセスできる。
 
-> ローカル開発では Access JWT がないため、認証ミドルウェアをバイパスする `DEV_MODE` フラグをコード内に用意している（後述）。
+> ローカル開発では Access JWT がないため、`ALLOWED_EMAIL` 環境変数を未設定にすることで認証チェックをスキップできる。
 
 ## 設定ファイル
 
@@ -138,20 +142,34 @@ database_id = "REPLACE_WITH_YOUR_D1_ID"
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler pages dev ./public --d1 DB=todo_db --persist",
+    "dev": "wrangler pages dev ./public",
     "deploy": "wrangler pages deploy ./public",
     "d1:create": "wrangler d1 create todo_db",
     "d1:migrate": "wrangler d1 migrations apply todo_db --local",
     "d1:migrate:remote": "wrangler d1 migrations apply todo_db --remote",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "knip": "knip",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run knip",
+    "prepare": "husky"
   },
   "dependencies": {
     "hono": "^4.7.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250214.0",
+    "@cloudflare/vitest-pool-workers": "^0.12.18",
+    "@cloudflare/workers-types": "^4.20260305.0",
+    "@vitest/coverage-istanbul": "^3.2.4",
+    "eslint": "^9.21.0",
     "typescript": "^5.5.4",
-    "wrangler": "^3.100.0"
+    "vitest": "^3.0.0",
+    "wrangler": "^4.69.0"
   }
 }
 ```
@@ -165,11 +183,20 @@ database_id = "REPLACE_WITH_YOUR_D1_ID"
     "lib": ["ES2022", "WebWorker"],
     "module": "ES2022",
     "moduleResolution": "Bundler",
-    "types": ["@cloudflare/workers-types"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-pool-workers"],
     "strict": true,
-    "noEmit": true
+    "noEmit": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": true,
+    "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "functions/**/*.ts"]
+  "include": ["src/**/*.ts", "functions/**/*.ts", "test/**/*.ts", "e2e/**/*.ts"]
 }
 ```
 
@@ -218,19 +245,17 @@ import type { Context, Next } from "hono";
 
 // ── 型定義 ──────────────────────────────────────────
 
-type AppEnv = {
+interface AppEnv {
   Bindings: {
     DB: D1Database;
+    ALLOWED_EMAIL?: string;
   };
   Variables: {
     userEmail: string;
   };
-};
+}
 
 const app = new Hono<AppEnv>();
-
-// 自分のメールアドレス（環境変数化しても OK）
-const ALLOWED_EMAIL = "your.email@example.com";
 
 // ── ヘルパー ────────────────────────────────────────
 
@@ -238,10 +263,12 @@ const ALLOWED_EMAIL = "your.email@example.com";
 function parseJwtPayload(jwt: string): Record<string, unknown> | null {
   const parts = jwt.split(".");
   if (parts.length !== 3) return null;
-  const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+  // parts[1] is guaranteed to exist since we checked length === 3
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const b64 = parts[1]!.replace(/-/g, "+").replace(/_/g, "/");
   const pad = b64.length % 4 === 0 ? "" : "=".repeat(4 - (b64.length % 4));
   try {
-    return JSON.parse(atob(b64 + pad));
+    return JSON.parse(atob(b64 + pad)) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -250,14 +277,13 @@ function parseJwtPayload(jwt: string): Record<string, unknown> | null {
 /** Access JWT からメールアドレスを取り出す */
 function extractEmail(request: Request): string | null {
   const jwt = request.headers.get("Cf-Access-Jwt-Assertion");
-  if (!jwt) return null;
+  if (jwt === null || jwt === "") return null;
   const payload = parseJwtPayload(jwt);
-  if (!payload) return null;
+  if (payload === null) return null;
 
-  // IdP によって claim 名が異なる場合があるので複数チェック
-  const email =
-    payload.email ?? payload.user_email ?? payload.upn ?? payload.preferred_username ?? null;
-  return typeof email === "string" ? email : null;
+  const candidates = [payload.email, payload.user_email, payload.upn, payload.preferred_username];
+  const email = candidates.find((v): v is string => typeof v === "string");
+  return email ?? null;
 }
 
 function nowIso(): string {
@@ -267,8 +293,11 @@ function nowIso(): string {
 /** UUID v4 互換の ID 生成（外部依存なし） */
 function newId(): string {
   const a = crypto.getRandomValues(new Uint8Array(16));
-  a[6] = (a[6] & 0x0f) | 0x40;
-  a[8] = (a[8] & 0x3f) | 0x80;
+  // Uint8Array(16) guarantees indices 6 and 8 exist
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  a[6] = (a[6]! & 0x0f) | 0x40;
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  a[8] = (a[8]! & 0x3f) | 0x80;
   const hex = [...a].map((b) => b.toString(16).padStart(2, "0")).join("");
   return [
     hex.slice(0, 8),
@@ -279,30 +308,39 @@ function newId(): string {
   ].join("-");
 }
 
+// ── リクエストボディパーサー ─────────────────────────
+
+function parseBodyField(bodyObj: Record<string, unknown>, key: string): string | null {
+  const val = bodyObj[key];
+  return typeof val === "string" ? val.trim() : null;
+}
+
 // ── 認証ミドルウェア（/api 配下に適用） ────────────
 
-const authMiddleware = async (c: Context<AppEnv>, next: Next) => {
+const authMiddleware = async (c: Context<AppEnv>, next: Next): Promise<Response | undefined> => {
+  const allowedEmail = c.env.ALLOWED_EMAIL ?? "";
   const email = extractEmail(c.req.raw);
 
-  // ローカル開発用: Access JWT がない場合は ALLOWED_EMAIL で通す
-  // 本番では Access が前段にいるので到達しない
-  if (!email) {
-    // DEV_MODE: ローカルテスト時はコメントを外す
-    // c.set("userEmail", ALLOWED_EMAIL);
-    // return next();
+  if (email === null) {
     return c.json({ ok: false, error: "missing access token" }, 401);
   }
 
-  if (email !== ALLOWED_EMAIL) {
+  if (allowedEmail !== "" && email !== allowedEmail) {
     return c.json({ ok: false, error: "forbidden" }, 403);
   }
 
   c.set("userEmail", email);
-  return next();
+  await next();
+  return undefined;
 };
 
-// /api 配下すべてに認証を適用
 app.use("/api/*", authMiddleware);
+
+// ── ヘルスチェック ──────────────────────────────────
+
+app.get("/api/health", (c) => {
+  return c.json({ ok: true, status: "healthy" });
+});
 
 // ── タスク CRUD ─────────────────────────────────────
 
@@ -324,18 +362,20 @@ app.get("/api/tasks", async (c) => {
   ).bind(email);
 
   const res = await stmt.all();
-  return c.json({ ok: true, tasks: res.results ?? [] });
+  return c.json({ ok: true, tasks: res.results });
 });
 
 /** POST /api/tasks — タスク作成 */
 app.post("/api/tasks", async (c) => {
   const email = c.get("userEmail");
-  const body = await c.req.json().catch(() => null);
+  const body: unknown = await c.req.json().catch(() => null);
 
-  const content = typeof body?.content === "string" ? body.content.trim() : "";
-  const dueDate = typeof body?.due_date === "string" ? body.due_date.trim() : "";
+  const bodyObj =
+    typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const content = parseBodyField(bodyObj, "content") ?? "";
+  const dueDate = parseBodyField(bodyObj, "due_date") ?? "";
 
-  if (!content) {
+  if (content === "") {
     return c.json({ ok: false, error: "content is required" }, 400);
   }
 
@@ -346,7 +386,7 @@ app.post("/api/tasks", async (c) => {
     `INSERT INTO tasks (id, user_email, due_date, content, created_at, updated_at, archived_at)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)`,
   )
-    .bind(id, email, dueDate || null, content, t, t)
+    .bind(id, email, dueDate === "" ? null : dueDate, content, t, t)
     .run();
 
   return c.json({ ok: true, id }, 201);
@@ -356,12 +396,14 @@ app.post("/api/tasks", async (c) => {
 app.patch("/api/tasks/:id", async (c) => {
   const email = c.get("userEmail");
   const id = c.req.param("id");
-  const body = await c.req.json().catch(() => null);
+  const body: unknown = await c.req.json().catch(() => null);
 
-  const content = typeof body?.content === "string" ? body.content.trim() : null;
-  const dueDate = typeof body?.due_date === "string" ? body.due_date.trim() : null;
+  const bodyObj =
+    typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const content = parseBodyField(bodyObj, "content");
+  const dueDate = parseBodyField(bodyObj, "due_date");
 
-  if (content !== null && content.length === 0) {
+  if (content !== null && content === "") {
     return c.json({ ok: false, error: "content cannot be empty" }, 400);
   }
 
@@ -371,30 +413,30 @@ app.patch("/api/tasks/:id", async (c) => {
   let idx = 1;
 
   if (content !== null) {
-    sets.push(`content = ?${idx++}`);
+    sets.push(`content = ?${String(idx++)}`);
     binds.push(content);
   }
   if (dueDate !== null) {
-    sets.push(`due_date = ?${idx++}`);
-    binds.push(dueDate || null);
+    sets.push(`due_date = ?${String(idx++)}`);
+    binds.push(dueDate === "" ? null : dueDate);
   }
 
   if (sets.length === 0) {
     return c.json({ ok: false, error: "no fields to update" }, 400);
   }
 
-  sets.push(`updated_at = ?${idx++}`);
+  sets.push(`updated_at = ?${String(idx++)}`);
   binds.push(t);
 
   const sql = `UPDATE tasks SET ${sets.join(", ")}
-     WHERE id = ?${idx++} AND user_email = ?${idx++} AND archived_at IS NULL`;
+     WHERE id = ?${String(idx++)} AND user_email = ?${String(idx++)} AND archived_at IS NULL`;
 
   binds.push(id, email);
 
   const result = await c.env.DB.prepare(sql)
     .bind(...binds)
     .run();
-  if ((result.meta?.changes ?? 0) === 0) {
+  if (result.meta.changes === 0) {
     return c.json({ ok: false, error: "task not found" }, 404);
   }
 
@@ -414,7 +456,7 @@ app.delete("/api/tasks/:id", async (c) => {
     .bind(t, t, id, email)
     .run();
 
-  if ((result.meta?.changes ?? 0) === 0) {
+  if (result.meta.changes === 0) {
     return c.json({ ok: false, error: "task not found" }, 404);
   }
 
@@ -436,10 +478,11 @@ app.get("/api/archive", async (c) => {
   ).bind(email);
 
   const res = await stmt.all();
-  return c.json({ ok: true, tasks: res.results ?? [] });
+  return c.json({ ok: true, tasks: res.results });
 });
 
 export { app };
+export type { AppEnv };
 ```
 
 ### 元の構成との比較
