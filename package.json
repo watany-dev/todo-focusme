@@ -1,0 +1,50 @@
+{
+  "name": "todo-focusme",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev ./public --d1 DB=todo_db --persist",
+    "deploy": "wrangler pages deploy ./public",
+    "d1:create": "wrangler d1 create todo_db",
+    "d1:migrate": "wrangler d1 migrations apply todo_db --local",
+    "d1:migrate:remote": "wrangler d1 migrations apply todo_db --remote",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest",
+    "test:e2e": "playwright test",
+    "knip": "knip",
+    "check": "npm run typecheck && npm run lint && npm run format:check && npm run knip",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "@cloudflare/workers-types": "^4.20250214.0",
+    "@eslint/js": "^9.21.0",
+    "@playwright/test": "^1.50.0",
+    "eslint": "^9.21.0",
+    "eslint-config-prettier": "^10.0.0",
+    "husky": "^9.1.0",
+    "knip": "^5.0.0",
+    "lint-staged": "^15.4.0",
+    "prettier": "^3.5.0",
+    "typescript": "^5.5.4",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^3.100.0"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,html,css,md,yml,yaml}": [
+      "prettier --write"
+    ]
+  }
+}

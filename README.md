@@ -31,13 +31,13 @@ Cloudflare だけで動く個人用 Todo アプリ。ほぼ無料・認証あり
 └─────────────────────────────────────────────────┘
 ```
 
-| レイヤー | 技術 | 役割 |
-|---------|------|------|
-| フロント | Cloudflare Pages（静的 HTML / Vanilla JS） | タスク一覧・登録・アーカイブ UI |
-| API | **Hono** on Cloudflare Pages Functions | RESTful CRUD + 認可 |
-| DB | Cloudflare D1（SQLite） | タスク永続化 |
-| 認証 | Cloudflare Zero Trust Access | 前段でログイン強制 |
-| 認可 | Hono ミドルウェア | Access JWT の email を検証し許可メール以外を拒否 |
+| レイヤー | 技術                                       | 役割                                             |
+| -------- | ------------------------------------------ | ------------------------------------------------ |
+| フロント | Cloudflare Pages（静的 HTML / Vanilla JS） | タスク一覧・登録・アーカイブ UI                  |
+| API      | **Hono** on Cloudflare Pages Functions     | RESTful CRUD + 認可                              |
+| DB       | Cloudflare D1（SQLite）                    | タスク永続化                                     |
+| 認証     | Cloudflare Zero Trust Access               | 前段でログイン強制                               |
+| 認可     | Hono ミドルウェア                          | Access JWT の email を検証し許可メール以外を拒否 |
 
 Pages と API が同一プロジェクト内でエッジ配信されるため体感が速い。D1 の無料枠は小規模個人 Todo なら十分。Access も無料プランで個人用途ならコストゼロ。
 
@@ -320,7 +320,7 @@ app.get("/api/tasks", async (c) => {
      FROM tasks
      WHERE user_email = ?1 AND archived_at IS NULL
      ORDER BY ${orderBy}
-     LIMIT 500`
+     LIMIT 500`,
   ).bind(email);
 
   const res = await stmt.all();
@@ -344,7 +344,7 @@ app.post("/api/tasks", async (c) => {
 
   await c.env.DB.prepare(
     `INSERT INTO tasks (id, user_email, due_date, content, created_at, updated_at, archived_at)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)`
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)`,
   )
     .bind(id, email, dueDate || null, content, t, t)
     .run();
@@ -391,7 +391,9 @@ app.patch("/api/tasks/:id", async (c) => {
 
   binds.push(id, email);
 
-  const result = await c.env.DB.prepare(sql).bind(...binds).run();
+  const result = await c.env.DB.prepare(sql)
+    .bind(...binds)
+    .run();
   if ((result.meta?.changes ?? 0) === 0) {
     return c.json({ ok: false, error: "task not found" }, 404);
   }
@@ -407,7 +409,7 @@ app.delete("/api/tasks/:id", async (c) => {
 
   const result = await c.env.DB.prepare(
     `UPDATE tasks SET archived_at = ?1, updated_at = ?2
-     WHERE id = ?3 AND user_email = ?4 AND archived_at IS NULL`
+     WHERE id = ?3 AND user_email = ?4 AND archived_at IS NULL`,
   )
     .bind(t, t, id, email)
     .run();
@@ -430,7 +432,7 @@ app.get("/api/archive", async (c) => {
      FROM tasks
      WHERE user_email = ?1 AND archived_at IS NOT NULL
      ORDER BY archived_at DESC
-     LIMIT 1000`
+     LIMIT 1000`,
   ).bind(email);
 
   const res = await stmt.all();
@@ -442,14 +444,14 @@ export { app };
 
 ### 元の構成との比較
 
-| 項目 | 元（素の Pages Functions） | Hono 版 |
-|------|--------------------------|---------|
-| ルーティング | ファイルベース（`functions/api/tasks.ts`, `archive.ts`） | プログラマティック（1 ファイルに集約） |
-| 認証コード | 各ファイルに重複して記述 | ミドルウェアで 1 箇所に集約 |
-| ID 受け渡し | クエリパラメータ `?id=xxx` | パスパラメータ `/api/tasks/:id`（RESTful） |
-| レスポンス生成 | `new Response(JSON.stringify(...))` を手動構築 | `c.json()` ヘルパー |
-| 型安全性 | `Env` を各ファイルで定義 | `Hono<AppEnv>` で一括管理 |
-| ファイル数 | 2 ファイル + 重複コード | 1 ファイル（+ 薄いエントリポイント） |
+| 項目           | 元（素の Pages Functions）                               | Hono 版                                    |
+| -------------- | -------------------------------------------------------- | ------------------------------------------ |
+| ルーティング   | ファイルベース（`functions/api/tasks.ts`, `archive.ts`） | プログラマティック（1 ファイルに集約）     |
+| 認証コード     | 各ファイルに重複して記述                                 | ミドルウェアで 1 箇所に集約                |
+| ID 受け渡し    | クエリパラメータ `?id=xxx`                               | パスパラメータ `/api/tasks/:id`（RESTful） |
+| レスポンス生成 | `new Response(JSON.stringify(...))` を手動構築           | `c.json()` ヘルパー                        |
+| 型安全性       | `Env` を各ファイルで定義                                 | `Hono<AppEnv>` で一括管理                  |
+| ファイル数     | 2 ファイル + 重複コード                                  | 1 ファイル（+ 薄いエントリポイント）       |
 
 ## フロントエンド
 
@@ -458,94 +460,158 @@ export { app };
 ```html
 <!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Todo</title>
-  <style>
-    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    body { margin: 16px; max-width: 900px; }
-    h1 { font-size: 20px; margin: 0 0 12px; }
-    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    input[type="date"] { padding: 8px; }
-    input[type="text"] { padding: 8px; min-width: 280px; flex: 1; }
-    button, select, a.btn {
-      padding: 8px 10px; border: 1px solid #ccc; background: #fff;
-      cursor: pointer; border-radius: 8px; text-decoration: none; color: inherit;
-    }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-    th, td { border-bottom: 1px solid #eee; padding: 10px 6px; vertical-align: top; }
-    th { text-align: left; font-weight: 600; }
-    td.due { width: 140px; white-space: nowrap; }
-    td.actions { width: 140px; }
-    .muted { color: #666; font-size: 12px; }
-    .error { color: #b00020; margin-top: 8px; }
-  </style>
-</head>
-<body>
-  <h1>Todo</h1>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Todo</title>
+    <style>
+      :root {
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+      }
+      body {
+        margin: 16px;
+        max-width: 900px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 12px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      input[type="date"] {
+        padding: 8px;
+      }
+      input[type="text"] {
+        padding: 8px;
+        min-width: 280px;
+        flex: 1;
+      }
+      button,
+      select,
+      a.btn {
+        padding: 8px 10px;
+        border: 1px solid #ccc;
+        background: #fff;
+        cursor: pointer;
+        border-radius: 8px;
+        text-decoration: none;
+        color: inherit;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #eee;
+        padding: 10px 6px;
+        vertical-align: top;
+      }
+      th {
+        text-align: left;
+        font-weight: 600;
+      }
+      td.due {
+        width: 140px;
+        white-space: nowrap;
+      }
+      td.actions {
+        width: 140px;
+      }
+      .muted {
+        color: #666;
+        font-size: 12px;
+      }
+      .error {
+        color: #b00020;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Todo</h1>
 
-  <div class="row">
-    <label class="muted">ソート</label>
-    <select id="sort">
-      <option value="due_asc">期日 昇順</option>
-      <option value="due_desc">期日 降順</option>
-      <option value="created_desc">作成日 新しい順</option>
-    </select>
-    <a class="btn" href="/archive.html">アーカイブを見る</a>
-  </div>
+    <div class="row">
+      <label class="muted">ソート</label>
+      <select id="sort">
+        <option value="due_asc">期日 昇順</option>
+        <option value="due_desc">期日 降順</option>
+        <option value="created_desc">作成日 新しい順</option>
+      </select>
+      <a class="btn" href="/archive.html">アーカイブを見る</a>
+    </div>
 
-  <div style="height: 10px;"></div>
+    <div style="height: 10px;"></div>
 
-  <div class="row">
-    <input id="due" type="date" />
-    <input id="content" type="text" placeholder="タスク内容" />
-    <button id="add">追加</button>
-  </div>
+    <div class="row">
+      <input id="due" type="date" />
+      <input id="content" type="text" placeholder="タスク内容" />
+      <button id="add">追加</button>
+    </div>
 
-  <div id="msg" class="muted"></div>
-  <div id="err" class="error"></div>
+    <div id="msg" class="muted"></div>
+    <div id="err" class="error"></div>
 
-  <table>
-    <thead>
-      <tr><th>期日</th><th>内容</th><th>操作</th></tr>
-    </thead>
-    <tbody id="list"></tbody>
-  </table>
+    <table>
+      <thead>
+        <tr>
+          <th>期日</th>
+          <th>内容</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="list"></tbody>
+    </table>
 
-<script>
-  const sortEl = document.getElementById("sort");
-  const dueEl = document.getElementById("due");
-  const contentEl = document.getElementById("content");
-  const addEl = document.getElementById("add");
-  const listEl = document.getElementById("list");
-  const msgEl = document.getElementById("msg");
-  const errEl = document.getElementById("err");
+    <script>
+      const sortEl = document.getElementById("sort");
+      const dueEl = document.getElementById("due");
+      const contentEl = document.getElementById("content");
+      const addEl = document.getElementById("add");
+      const listEl = document.getElementById("list");
+      const msgEl = document.getElementById("msg");
+      const errEl = document.getElementById("err");
 
-  function setMsg(text) { msgEl.textContent = text || ""; }
-  function setErr(text) { errEl.textContent = text || ""; }
+      function setMsg(text) {
+        msgEl.textContent = text || "";
+      }
+      function setErr(text) {
+        errEl.textContent = text || "";
+      }
 
-  function esc(s) {
-    return String(s).replace(/[&<>"']/g, (c) =>
-      ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c]);
-  }
+      function esc(s) {
+        return String(s).replace(
+          /[&<>"']/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+        );
+      }
 
-  async function api(path, options) {
-    const res = await fetch(path, {
-      headers: { "content-type": "application/json" },
-      cache: "no-store",
-      ...options,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) throw new Error(data.error || "HTTP " + res.status);
-    return data;
-  }
+      async function api(path, options) {
+        const res = await fetch(path, {
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          ...options,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || "HTTP " + res.status);
+        return data;
+      }
 
-  function render(tasks) {
-    listEl.innerHTML = "";
-    for (const t of tasks) {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
+      function render(tasks) {
+        listEl.innerHTML = "";
+        for (const t of tasks) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
         <td class="due">${esc(t.due_date || "")}</td>
         <td>
           <div>${esc(t.content)}</div>
@@ -554,53 +620,62 @@ export { app };
         <td class="actions">
           <button data-act="archive" data-id="${esc(t.id)}">アーカイブ</button>
         </td>`;
-      listEl.appendChild(tr);
-    }
-  }
+          listEl.appendChild(tr);
+        }
+      }
 
-  async function load() {
-    setErr("");
-    setMsg("読み込み中...");
-    const data = await api(`/api/tasks?sort=${encodeURIComponent(sortEl.value)}`);
-    render(data.tasks || []);
-    setMsg(`件数: ${(data.tasks || []).length}`);
-  }
+      async function load() {
+        setErr("");
+        setMsg("読み込み中...");
+        const data = await api(`/api/tasks?sort=${encodeURIComponent(sortEl.value)}`);
+        render(data.tasks || []);
+        setMsg(`件数: ${(data.tasks || []).length}`);
+      }
 
-  addEl.addEventListener("click", async () => {
-    setErr("");
-    const content = contentEl.value.trim();
-    const due_date = dueEl.value;
-    if (!content) { setErr("内容を入力してください"); return; }
+      addEl.addEventListener("click", async () => {
+        setErr("");
+        const content = contentEl.value.trim();
+        const due_date = dueEl.value;
+        if (!content) {
+          setErr("内容を入力してください");
+          return;
+        }
 
-    addEl.disabled = true;
-    try {
-      await api("/api/tasks", { method: "POST", body: JSON.stringify({ content, due_date }) });
-      contentEl.value = "";
-      await load();
-    } catch (e) { setErr(e.message); }
-    finally { addEl.disabled = false; }
-  });
+        addEl.disabled = true;
+        try {
+          await api("/api/tasks", { method: "POST", body: JSON.stringify({ content, due_date }) });
+          contentEl.value = "";
+          await load();
+        } catch (e) {
+          setErr(e.message);
+        } finally {
+          addEl.disabled = false;
+        }
+      });
 
-  sortEl.addEventListener("change", load);
+      sortEl.addEventListener("change", load);
 
-  // アーカイブボタン — RESTful パス /api/tasks/:id に DELETE
-  listEl.addEventListener("click", async (ev) => {
-    const btn = ev.target.closest("button");
-    if (!btn || btn.getAttribute("data-act") !== "archive") return;
-    const id = btn.getAttribute("data-id");
+      // アーカイブボタン — RESTful パス /api/tasks/:id に DELETE
+      listEl.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button");
+        if (!btn || btn.getAttribute("data-act") !== "archive") return;
+        const id = btn.getAttribute("data-id");
 
-    btn.disabled = true;
-    setErr("");
-    try {
-      await api(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
-      await load();
-    } catch (e) { setErr(e.message); }
-    finally { btn.disabled = false; }
-  });
+        btn.disabled = true;
+        setErr("");
+        try {
+          await api(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+          await load();
+        } catch (e) {
+          setErr(e.message);
+        } finally {
+          btn.disabled = false;
+        }
+      });
 
-  load().catch((e) => setErr(e.message));
-</script>
-</body>
+      load().catch((e) => setErr(e.message));
+    </script>
+  </body>
 </html>
 ```
 
@@ -609,73 +684,119 @@ export { app };
 ```html
 <!doctype html>
 <html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Todo Archive</title>
-  <style>
-    :root { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-    body { margin: 16px; max-width: 900px; }
-    h1 { font-size: 20px; margin: 0 0 12px; }
-    a.btn {
-      display: inline-block; padding: 8px 10px; border: 1px solid #ccc;
-      border-radius: 8px; text-decoration: none; color: inherit;
-    }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-    th, td { border-bottom: 1px solid #eee; padding: 10px 6px; vertical-align: top; }
-    th { text-align: left; font-weight: 600; }
-    td.due { width: 140px; white-space: nowrap; }
-    .muted { color: #666; font-size: 12px; }
-    .error { color: #b00020; margin-top: 8px; }
-  </style>
-</head>
-<body>
-  <h1>アーカイブ</h1>
-  <a class="btn" href="/">← 戻る</a>
-  <div id="err" class="error"></div>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Todo Archive</title>
+    <style>
+      :root {
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+      }
+      body {
+        margin: 16px;
+        max-width: 900px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 12px;
+      }
+      a.btn {
+        display: inline-block;
+        padding: 8px 10px;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        text-decoration: none;
+        color: inherit;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #eee;
+        padding: 10px 6px;
+        vertical-align: top;
+      }
+      th {
+        text-align: left;
+        font-weight: 600;
+      }
+      td.due {
+        width: 140px;
+        white-space: nowrap;
+      }
+      .muted {
+        color: #666;
+        font-size: 12px;
+      }
+      .error {
+        color: #b00020;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>アーカイブ</h1>
+    <a class="btn" href="/">← 戻る</a>
+    <div id="err" class="error"></div>
 
-  <table>
-    <thead>
-      <tr><th>期日</th><th>内容</th><th>アーカイブ日時</th></tr>
-    </thead>
-    <tbody id="list"></tbody>
-  </table>
+    <table>
+      <thead>
+        <tr>
+          <th>期日</th>
+          <th>内容</th>
+          <th>アーカイブ日時</th>
+        </tr>
+      </thead>
+      <tbody id="list"></tbody>
+    </table>
 
-<script>
-  const listEl = document.getElementById("list");
-  const errEl = document.getElementById("err");
+    <script>
+      const listEl = document.getElementById("list");
+      const errEl = document.getElementById("err");
 
-  function esc(s) {
-    return String(s).replace(/[&<>"']/g, (c) =>
-      ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"})[c]);
-  }
+      function esc(s) {
+        return String(s).replace(
+          /[&<>"']/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+        );
+      }
 
-  async function api(path) {
-    const res = await fetch(path, { cache: "no-store" });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.ok === false) throw new Error(data.error || "HTTP " + res.status);
-    return data;
-  }
+      async function api(path) {
+        const res = await fetch(path, { cache: "no-store" });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || "HTTP " + res.status);
+        return data;
+      }
 
-  (async () => {
-    try {
-      const data = await api("/api/archive");
-      listEl.innerHTML = "";
-      for (const t of data.tasks || []) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
+      (async () => {
+        try {
+          const data = await api("/api/archive");
+          listEl.innerHTML = "";
+          for (const t of data.tasks || []) {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `
           <td class="due">${esc(t.due_date || "")}</td>
           <td>
             <div>${esc(t.content)}</div>
             <div class="muted">created: ${esc(t.created_at)}</div>
           </td>
           <td>${esc(t.archived_at || "")}</td>`;
-        listEl.appendChild(tr);
-      }
-    } catch (e) { errEl.textContent = e.message; }
-  })();
-</script>
-</body>
+            listEl.appendChild(tr);
+          }
+        } catch (e) {
+          errEl.textContent = e.message;
+        }
+      })();
+    </script>
+  </body>
 </html>
 ```
 
