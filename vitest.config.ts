@@ -4,7 +4,7 @@ export default defineWorkersConfig({
   test: {
     passWithNoTests: true,
     coverage: {
-      provider: "v8",
+      provider: "istanbul",
       enabled: true,
       include: ["src/**/*.ts", "functions/**/*.ts"],
       exclude: ["**/*.test.ts", "**/*.spec.ts", "**/__mocks__/**"],
@@ -19,6 +19,9 @@ export default defineWorkersConfig({
     poolOptions: {
       workers: {
         wrangler: { configPath: "./wrangler.toml" },
+        miniflare: {
+          compatibilityFlags: ["nodejs_compat"],
+        },
       },
     },
   },
