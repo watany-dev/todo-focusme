@@ -1,0 +1,9 @@
+name = "todo-focusme"
+compatibility_date = "2026-02-28"
+
+pages_build_output_dir = "./public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "todo_db"
+database_id = "REPLACE_WITH_YOUR_D1_ID"
