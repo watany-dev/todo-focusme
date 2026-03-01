@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Todo</title>
+    <style>
+      :root {
+        font-family:
+          system-ui,
+          -apple-system,
+          Segoe UI,
+          Roboto,
+          sans-serif;
+      }
+      body {
+        margin: 16px;
+        max-width: 900px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0 0 12px;
+      }
+      .row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      input[type="date"] {
+        padding: 8px;
+      }
+      input[type="text"] {
+        padding: 8px;
+        min-width: 280px;
+        flex: 1;
+      }
+      button,
+      select,
+      a.btn {
+        padding: 8px 10px;
+        border: 1px solid #ccc;
+        background: #fff;
+        cursor: pointer;
+        border-radius: 8px;
+        text-decoration: none;
+        color: inherit;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 12px;
+      }
+      th,
+      td {
+        border-bottom: 1px solid #eee;
+        padding: 10px 6px;
+        vertical-align: top;
+      }
+      th {
+        text-align: left;
+        font-weight: 600;
+      }
+      td.due {
+        width: 140px;
+        white-space: nowrap;
+      }
+      td.actions {
+        width: 140px;
+      }
+      .muted {
+        color: #666;
+        font-size: 12px;
+      }
+      .error {
+        color: #b00020;
+        margin-top: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Todo</h1>
+
+    <div class="row">
+      <label class="muted">ソート</label>
+      <select id="sort">
+        <option value="due_asc">期日 昇順</option>
+        <option value="due_desc">期日 降順</option>
+        <option value="created_desc">作成日 新しい順</option>
+      </select>
+      <a class="btn" href="/archive.html">アーカイブを見る</a>
+    </div>
+
+    <div style="height: 10px"></div>
+
+    <div class="row">
+      <input id="due" type="date" />
+      <input id="content" type="text" placeholder="タスク内容" />
+      <button id="add">追加</button>
+    </div>
+
+    <div id="msg" class="muted"></div>
+    <div id="err" class="error"></div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>期日</th>
+          <th>内容</th>
+          <th>操作</th>
+        </tr>
+      </thead>
+      <tbody id="list"></tbody>
+    </table>
+
+    <script>
+      const sortEl = document.getElementById("sort");
+      const dueEl = document.getElementById("due");
+      const contentEl = document.getElementById("content");
+      const addEl = document.getElementById("add");
+      const listEl = document.getElementById("list");
+      const msgEl = document.getElementById("msg");
+      const errEl = document.getElementById("err");
+
+      function setMsg(text) {
+        msgEl.textContent = text || "";
+      }
+      function setErr(text) {
+        errEl.textContent = text || "";
+      }
+
+      function esc(s) {
+        return String(s).replace(
+          /[&<>"']/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+        );
+      }
+
+      async function api(path, options) {
+        const res = await fetch(path, {
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          ...options,
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.ok === false) throw new Error(data.error || "HTTP " + res.status);
+        return data;
+      }
+
+      function render(tasks) {
+        listEl.innerHTML = "";
+        for (const t of tasks) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+        <td class="due">${esc(t.due_date || "")}</td>
+        <td>
+          <div>${esc(t.content)}</div>
+          <div class="muted">updated: ${esc(t.updated_at)}</div>
+        </td>
+        <td class="actions">
+          <button data-act="archive" data-id="${esc(t.id)}">アーカイブ</button>
+        </td>`;
+          listEl.appendChild(tr);
+        }
+      }
+
+      async function load() {
+        setErr("");
+        setMsg("読み込み中...");
+        const data = await api(`/api/tasks?sort=${encodeURIComponent(sortEl.value)}`);
+        render(data.tasks || []);
+        setMsg(`件数: ${(data.tasks || []).length}`);
+      }
+
+      addEl.addEventListener("click", async () => {
+        setErr("");
+        const content = contentEl.value.trim();
+        const due_date = dueEl.value;
+        if (!content) {
+          setErr("内容を入力してください");
+          return;
+        }
+
+        addEl.disabled = true;
+        try {
+          await api("/api/tasks", {
+            method: "POST",
+            body: JSON.stringify({ content, due_date }),
+          });
+          contentEl.value = "";
+          await load();
+        } catch (e) {
+          setErr(e.message);
+        } finally {
+          addEl.disabled = false;
+        }
+      });
+
+      sortEl.addEventListener("change", load);
+
+      listEl.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button");
+        if (!btn || btn.getAttribute("data-act") !== "archive") return;
+        const id = btn.getAttribute("data-id");
+
+        btn.disabled = true;
+        setErr("");
+        try {
+          await api(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+          await load();
+        } catch (e) {
+          setErr(e.message);
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      load().catch((e) => setErr(e.message));
+    </script>
+  </body>
+</html>
