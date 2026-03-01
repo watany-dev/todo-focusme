@@ -158,10 +158,31 @@
           <div class="muted">updated: ${esc(t.updated_at)}</div>
         </td>
         <td class="actions">
+          <button data-act="edit" data-id="${esc(t.id)}" data-due="${esc(t.due_date || "")}" data-content="${esc(t.content)}">編集</button>
           <button data-act="archive" data-id="${esc(t.id)}">アーカイブ</button>
         </td>`;
           listEl.appendChild(tr);
         }
+      }
+
+      function startEdit(btn) {
+        var id = btn.getAttribute("data-id");
+        var due = btn.getAttribute("data-due");
+        var content = btn.getAttribute("data-content");
+        var editing = listEl.querySelector("tr[data-editing]");
+        if (editing) {
+          load();
+          return;
+        }
+        var tr = btn.closest("tr");
+        tr.setAttribute("data-editing", "true");
+        tr.innerHTML = `
+        <td class="due"><input type="date" class="edit-due" value="${esc(due)}" /></td>
+        <td><input type="text" class="edit-content" value="${esc(content)}" style="padding:8px;min-width:280px;width:100%" /></td>
+        <td class="actions">
+          <button data-act="save" data-id="${esc(id)}">保存</button>
+          <button data-act="cancel" data-id="${esc(id)}">キャンセル</button>
+        </td>`;
       }
 
       async function load() {
@@ -200,18 +221,55 @@
 
       listEl.addEventListener("click", async (ev) => {
         const btn = ev.target.closest("button");
-        if (!btn || btn.getAttribute("data-act") !== "archive") return;
+        if (!btn) return;
+        const act = btn.getAttribute("data-act");
         const id = btn.getAttribute("data-id");
 
-        btn.disabled = true;
-        setErr("");
-        try {
-          await api(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+        if (act === "edit") {
+          startEdit(btn);
+          return;
+        }
+
+        if (act === "cancel") {
           await load();
-        } catch (e) {
-          setErr(e.message);
-        } finally {
-          btn.disabled = false;
+          return;
+        }
+
+        if (act === "save") {
+          var tr = btn.closest("tr");
+          var newContent = tr.querySelector(".edit-content").value.trim();
+          var newDue = tr.querySelector(".edit-due").value;
+          if (!newContent) {
+            setErr("内容を入力してください");
+            return;
+          }
+          btn.disabled = true;
+          setErr("");
+          try {
+            await api(`/api/tasks/${encodeURIComponent(id)}`, {
+              method: "PATCH",
+              body: JSON.stringify({ content: newContent, due_date: newDue }),
+            });
+            await load();
+          } catch (e) {
+            setErr(e.message);
+          } finally {
+            btn.disabled = false;
+          }
+          return;
+        }
+
+        if (act === "archive") {
+          btn.disabled = true;
+          setErr("");
+          try {
+            await api(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
+            await load();
+          } catch (e) {
+            setErr(e.message);
+          } finally {
+            btn.disabled = false;
+          }
         }
       });
 
