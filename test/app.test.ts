@@ -448,3 +448,110 @@ describe("GET /api/archive", () => {
     expect(tasks[0]?.archived_at).toBeTruthy();
   });
 });
+
+describe("PUT /api/archive/:id", () => {
+  beforeEach(setupDb);
+
+  it("restores an archived task", async () => {
+    const createBody = await jsonBody(
+      await req("/api/tasks", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ content: "Restore me" }),
+      }),
+    );
+    const id = createBody.id ?? "";
+
+    await req(`/api/tasks/${id}`, { method: "DELETE", headers: authHeaders() });
+
+    const res = await req(`/api/archive/${id}`, {
+      method: "PUT",
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(200);
+    expect((await jsonBody(res)).ok).toBe(true);
+  });
+
+  it("restored task appears in GET /api/tasks", async () => {
+    const createBody = await jsonBody(
+      await req("/api/tasks", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ content: "Restore me" }),
+      }),
+    );
+    const id = createBody.id ?? "";
+
+    await req(`/api/tasks/${id}`, { method: "DELETE", headers: authHeaders() });
+    await req(`/api/archive/${id}`, { method: "PUT", headers: authHeaders() });
+
+    const listBody = await jsonBody(await req("/api/tasks", { headers: authHeaders() }));
+    const tasks = listBody.tasks ?? [];
+    expect(tasks).toHaveLength(1);
+    expect(tasks[0]?.content).toBe("Restore me");
+  });
+
+  it("restored task disappears from GET /api/archive", async () => {
+    const createBody = await jsonBody(
+      await req("/api/tasks", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ content: "Restore me" }),
+      }),
+    );
+    const id = createBody.id ?? "";
+
+    await req(`/api/tasks/${id}`, { method: "DELETE", headers: authHeaders() });
+    await req(`/api/archive/${id}`, { method: "PUT", headers: authHeaders() });
+
+    const archiveBody = await jsonBody(await req("/api/archive", { headers: authHeaders() }));
+    expect(archiveBody.tasks).toEqual([]);
+  });
+
+  it("returns 404 for non-existent id", async () => {
+    const res = await req("/api/archive/nonexistent", {
+      method: "PUT",
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(404);
+    expect((await jsonBody(res)).error).toBe("task not found");
+  });
+
+  it("returns 404 for active (non-archived) task", async () => {
+    const createBody = await jsonBody(
+      await req("/api/tasks", {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ content: "Active task" }),
+      }),
+    );
+    const id = createBody.id ?? "";
+
+    const res = await req(`/api/archive/${id}`, {
+      method: "PUT",
+      headers: authHeaders(),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when restoring another user's task", async () => {
+    const OTHER_EMAIL = "other@example.com";
+
+    const createBody = await jsonBody(
+      await req("/api/tasks", {
+        method: "POST",
+        headers: authHeaders(OTHER_EMAIL),
+        body: JSON.stringify({ content: "Other user task" }),
+      }),
+    );
+    const id = createBody.id ?? "";
+
+    await req(`/api/tasks/${id}`, { method: "DELETE", headers: authHeaders(OTHER_EMAIL) });
+
+    const res = await req(`/api/archive/${id}`, {
+      method: "PUT",
+      headers: authHeaders(TEST_EMAIL),
+    });
+    expect(res.status).toBe(404);
+  });
+});

@@ -1,6 +1,6 @@
 # todo-focusme
 
-Cloudflare だけで動く個人用 Todo アプリ。ほぼ無料・認証あり・高速・軽量・CRUD・アーカイブ対応。
+Cloudflare だけで動く個人用 Todo アプリ。ほぼ無料・認証あり・高速・軽量・CRUD・インライン編集・アーカイブ/復元対応。
 
 ## アーキテクチャ
 
@@ -16,13 +16,14 @@ Cloudflare だけで動く個人用 Todo アプリ。ほぼ無料・認証あり
 │  ┌────────────────────────────────────────────┐ │
 │  │  Cloudflare Pages                          │ │
 │  │                                            │ │
-│  │  public/          Hono (Functions)         │ │
-│  │  ├─ index.html    ├─ GET  /api/health     │ │
-│  │  └─ archive.html  ├─ GET  /api/tasks      │ │
-│  │    (静的配信)      ├─ POST /api/tasks      │ │
-│  │                   ├─ PATCH /api/tasks/:id │ │
-│  │                   ├─ DELETE /api/tasks/:id │ │
-│  │                   └─ GET  /api/archive     │ │
+│  │  public/          Hono (Functions)          │ │
+│  │  ├─ index.html    ├─ GET  /api/health      │ │
+│  │  └─ archive.html  ├─ GET  /api/tasks       │ │
+│  │    (静的配信)      ├─ POST /api/tasks       │ │
+│  │                   ├─ PATCH /api/tasks/:id  │ │
+│  │                   ├─ DELETE /api/tasks/:id  │ │
+│  │                   ├─ GET  /api/archive      │ │
+│  │                   └─ PUT  /api/archive/:id  │ │
 │  └──────────────────────┬─────────────────────┘ │
 │                         ▼                       │
 │  ┌────────────────────────────────────────────┐ │
@@ -32,13 +33,13 @@ Cloudflare だけで動く個人用 Todo アプリ。ほぼ無料・認証あり
 └─────────────────────────────────────────────────┘
 ```
 
-| レイヤー | 技術                                       | 役割                                             |
-| -------- | ------------------------------------------ | ------------------------------------------------ |
-| フロント | Cloudflare Pages（静的 HTML / Vanilla JS） | タスク一覧・登録・アーカイブ UI                  |
-| API      | **Hono** on Cloudflare Pages Functions     | RESTful CRUD + 認可                              |
-| DB       | Cloudflare D1（SQLite）                    | タスク永続化                                     |
-| 認証     | Cloudflare Zero Trust Access               | 前段でログイン強制                               |
-| 認可     | Hono ミドルウェア                          | Access JWT の email を検証し許可メール以外を拒否 |
+| レイヤー | 技術                                       | 役割                                                  |
+| -------- | ------------------------------------------ | ----------------------------------------------------- |
+| フロント | Cloudflare Pages（静的 HTML / Vanilla JS） | タスク一覧・登録・インライン編集・アーカイブ・復元 UI |
+| API      | **Hono** on Cloudflare Pages Functions     | RESTful CRUD + 認可                                   |
+| DB       | Cloudflare D1（SQLite）                    | タスク永続化                                          |
+| 認証     | Cloudflare Zero Trust Access               | 前段でログイン強制                                    |
+| 認可     | Hono ミドルウェア                          | Access JWT の email を検証し許可メール以外を拒否      |
 
 Pages と API が同一プロジェクト内でエッジ配信されるため体感が速い。D1 の無料枠は小規模個人 Todo なら十分。Access も無料プランで個人用途ならコストゼロ。
 
@@ -481,6 +482,26 @@ app.get("/api/archive", async (c) => {
   return c.json({ ok: true, tasks: res.results });
 });
 
+/** PUT /api/archive/:id — アーカイブ済みタスクを復元 */
+app.put("/api/archive/:id", async (c) => {
+  const email = c.get("userEmail");
+  const id = c.req.param("id");
+  const t = nowIso();
+
+  const result = await c.env.DB.prepare(
+    `UPDATE tasks SET archived_at = NULL, updated_at = ?1
+     WHERE id = ?2 AND user_email = ?3 AND archived_at IS NOT NULL`,
+  )
+    .bind(t, id, email)
+    .run();
+
+  if (result.meta.changes === 0) {
+    return c.json({ ok: false, error: "task not found" }, 404);
+  }
+
+  return c.json({ ok: true });
+});
+
 export { app };
 export type { AppEnv };
 ```
@@ -498,350 +519,27 @@ export type { AppEnv };
 
 ## フロントエンド
 
-### public/index.html — タスク一覧
+### public/index.html — タスク一覧（インライン編集対応）
 
-```html
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Todo</title>
-    <style>
-      :root {
-        font-family:
-          system-ui,
-          -apple-system,
-          Segoe UI,
-          Roboto,
-          sans-serif;
-      }
-      body {
-        margin: 16px;
-        max-width: 900px;
-      }
-      h1 {
-        font-size: 20px;
-        margin: 0 0 12px;
-      }
-      .row {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
-      input[type="date"] {
-        padding: 8px;
-      }
-      input[type="text"] {
-        padding: 8px;
-        min-width: 280px;
-        flex: 1;
-      }
-      button,
-      select,
-      a.btn {
-        padding: 8px 10px;
-        border: 1px solid #ccc;
-        background: #fff;
-        cursor: pointer;
-        border-radius: 8px;
-        text-decoration: none;
-        color: inherit;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 12px;
-      }
-      th,
-      td {
-        border-bottom: 1px solid #eee;
-        padding: 10px 6px;
-        vertical-align: top;
-      }
-      th {
-        text-align: left;
-        font-weight: 600;
-      }
-      td.due {
-        width: 140px;
-        white-space: nowrap;
-      }
-      td.actions {
-        width: 140px;
-      }
-      .muted {
-        color: #666;
-        font-size: 12px;
-      }
-      .error {
-        color: #b00020;
-        margin-top: 8px;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Todo</h1>
+タスクの表示・追加・アーカイブに加え、各行の「編集」ボタンでインライン編集が可能。行内で `due_date` / `content` を直接変更し、`PATCH /api/tasks/:id` で保存する。同時に編集できるのは1行のみ。
 
-    <div class="row">
-      <label class="muted">ソート</label>
-      <select id="sort">
-        <option value="due_asc">期日 昇順</option>
-        <option value="due_desc">期日 降順</option>
-        <option value="created_desc">作成日 新しい順</option>
-      </select>
-      <a class="btn" href="/archive.html">アーカイブを見る</a>
-    </div>
+主要な JavaScript 関数:
 
-    <div style="height: 10px;"></div>
+- `render(tasks)` — タスク行を描画。各行に「編集」「アーカイブ」ボタンを配置
+- `startEdit(btn)` — 該当行を `<input>` に差し替えて編集モードに切り替え
+- `load()` — API からタスク一覧を再取得して再描画
+- イベント委譲で `data-act` 属性（`edit` / `save` / `cancel` / `archive`）を処理
 
-    <div class="row">
-      <input id="due" type="date" />
-      <input id="content" type="text" placeholder="タスク内容" />
-      <button id="add">追加</button>
-    </div>
+### public/archive.html — アーカイブ一覧（復元対応）
 
-    <div id="msg" class="muted"></div>
-    <div id="err" class="error"></div>
+アーカイブ済みタスクの一覧表示に加え、各行の「復元」ボタンで `PUT /api/archive/:id` を呼び出してタスクをアクティブに戻す。
 
-    <table>
-      <thead>
-        <tr>
-          <th>期日</th>
-          <th>内容</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody id="list"></tbody>
-    </table>
+主要な JavaScript 関数:
 
-    <script>
-      const sortEl = document.getElementById("sort");
-      const dueEl = document.getElementById("due");
-      const contentEl = document.getElementById("content");
-      const addEl = document.getElementById("add");
-      const listEl = document.getElementById("list");
-      const msgEl = document.getElementById("msg");
-      const errEl = document.getElementById("err");
-
-      function setMsg(text) {
-        msgEl.textContent = text || "";
-      }
-      function setErr(text) {
-        errEl.textContent = text || "";
-      }
-
-      function esc(s) {
-        return String(s).replace(
-          /[&<>"']/g,
-          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
-        );
-      }
-
-      async function api(path, options) {
-        const res = await fetch(path, {
-          headers: { "content-type": "application/json" },
-          cache: "no-store",
-          ...options,
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.ok === false) throw new Error(data.error || "HTTP " + res.status);
-        return data;
-      }
-
-      function render(tasks) {
-        listEl.innerHTML = "";
-        for (const t of tasks) {
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-        <td class="due">${esc(t.due_date || "")}</td>
-        <td>
-          <div>${esc(t.content)}</div>
-          <div class="muted">updated: ${esc(t.updated_at)}</div>
-        </td>
-        <td class="actions">
-          <button data-act="archive" data-id="${esc(t.id)}">アーカイブ</button>
-        </td>`;
-          listEl.appendChild(tr);
-        }
-      }
-
-      async function load() {
-        setErr("");
-        setMsg("読み込み中...");
-        const data = await api(`/api/tasks?sort=${encodeURIComponent(sortEl.value)}`);
-        render(data.tasks || []);
-        setMsg(`件数: ${(data.tasks || []).length}`);
-      }
-
-      addEl.addEventListener("click", async () => {
-        setErr("");
-        const content = contentEl.value.trim();
-        const due_date = dueEl.value;
-        if (!content) {
-          setErr("内容を入力してください");
-          return;
-        }
-
-        addEl.disabled = true;
-        try {
-          await api("/api/tasks", { method: "POST", body: JSON.stringify({ content, due_date }) });
-          contentEl.value = "";
-          await load();
-        } catch (e) {
-          setErr(e.message);
-        } finally {
-          addEl.disabled = false;
-        }
-      });
-
-      sortEl.addEventListener("change", load);
-
-      // アーカイブボタン — RESTful パス /api/tasks/:id に DELETE
-      listEl.addEventListener("click", async (ev) => {
-        const btn = ev.target.closest("button");
-        if (!btn || btn.getAttribute("data-act") !== "archive") return;
-        const id = btn.getAttribute("data-id");
-
-        btn.disabled = true;
-        setErr("");
-        try {
-          await api(`/api/tasks/${encodeURIComponent(id)}`, { method: "DELETE" });
-          await load();
-        } catch (e) {
-          setErr(e.message);
-        } finally {
-          btn.disabled = false;
-        }
-      });
-
-      load().catch((e) => setErr(e.message));
-    </script>
-  </body>
-</html>
-```
-
-### public/archive.html — アーカイブ一覧
-
-```html
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Todo Archive</title>
-    <style>
-      :root {
-        font-family:
-          system-ui,
-          -apple-system,
-          Segoe UI,
-          Roboto,
-          sans-serif;
-      }
-      body {
-        margin: 16px;
-        max-width: 900px;
-      }
-      h1 {
-        font-size: 20px;
-        margin: 0 0 12px;
-      }
-      a.btn {
-        display: inline-block;
-        padding: 8px 10px;
-        border: 1px solid #ccc;
-        border-radius: 8px;
-        text-decoration: none;
-        color: inherit;
-      }
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin-top: 12px;
-      }
-      th,
-      td {
-        border-bottom: 1px solid #eee;
-        padding: 10px 6px;
-        vertical-align: top;
-      }
-      th {
-        text-align: left;
-        font-weight: 600;
-      }
-      td.due {
-        width: 140px;
-        white-space: nowrap;
-      }
-      .muted {
-        color: #666;
-        font-size: 12px;
-      }
-      .error {
-        color: #b00020;
-        margin-top: 8px;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>アーカイブ</h1>
-    <a class="btn" href="/">← 戻る</a>
-    <div id="err" class="error"></div>
-
-    <table>
-      <thead>
-        <tr>
-          <th>期日</th>
-          <th>内容</th>
-          <th>アーカイブ日時</th>
-        </tr>
-      </thead>
-      <tbody id="list"></tbody>
-    </table>
-
-    <script>
-      const listEl = document.getElementById("list");
-      const errEl = document.getElementById("err");
-
-      function esc(s) {
-        return String(s).replace(
-          /[&<>"']/g,
-          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
-        );
-      }
-
-      async function api(path) {
-        const res = await fetch(path, { cache: "no-store" });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || data.ok === false) throw new Error(data.error || "HTTP " + res.status);
-        return data;
-      }
-
-      (async () => {
-        try {
-          const data = await api("/api/archive");
-          listEl.innerHTML = "";
-          for (const t of data.tasks || []) {
-            const tr = document.createElement("tr");
-            tr.innerHTML = `
-          <td class="due">${esc(t.due_date || "")}</td>
-          <td>
-            <div>${esc(t.content)}</div>
-            <div class="muted">created: ${esc(t.created_at)}</div>
-          </td>
-          <td>${esc(t.archived_at || "")}</td>`;
-            listEl.appendChild(tr);
-          }
-        } catch (e) {
-          errEl.textContent = e.message;
-        }
-      })();
-    </script>
-  </body>
-</html>
-```
+- `api(path, options)` — `index.html` と同等の fetch ヘルパー（PUT 対応）
+- `render(tasks)` — アーカイブ行を描画。各行に「復元」ボタンを配置
+- `load()` — API からアーカイブ一覧を再取得して再描画
+- イベント委譲で `data-act="restore"` を処理（二重送信防止付き）
 
 ## デプロイ
 
@@ -917,8 +615,8 @@ wrangler d1 export todo_db --remote --output backup.sql
 ### UI 改善案（費用対効果の高い順）
 
 1. **Access プラグインで JWT 完全検証** — 署名検証を Functions 側でも実施
-2. **アーカイブから復帰** — `PATCH /api/archive/:id` で `archived_at = NULL` に戻す
-3. **インライン編集** — `PATCH /api/tasks/:id` は実装済みなのでフロント側に編集 UI を追加するだけ
+2. ~~**アーカイブから復帰**~~ — ✅ 実装済み（`PUT /api/archive/:id`）
+3. ~~**インライン編集**~~ — ✅ 実装済み（`index.html` でインライン編集 UI を追加）
 4. **期日なしタスクの最下段固定** — SQL の `ORDER BY` で対応済み（`due_date IS NULL` を先頭に）
 
 ### 監視
