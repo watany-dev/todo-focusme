@@ -22,6 +22,7 @@ npm run lint:fix         # ESLint with auto-fix
 npm run format           # Prettier format
 npm run format:check     # Prettier check
 npm run test             # Vitest (unit tests)
+npm run test:coverage    # Vitest with coverage (95% threshold enforced)
 npm run test:e2e         # Playwright (e2e tests)
 npm run knip             # Dead code / unused dependency detection
 npm run check            # Run all checks (typecheck + lint + format + knip)
@@ -31,12 +32,23 @@ npm run d1:migrate:remote # Apply D1 migrations to production
 
 ## Code Conventions
 
-- TypeScript strict mode enabled
+- TypeScript strict mode with additional strict options (noUncheckedIndexedAccess, exactOptionalPropertyTypes, etc.)
+- ESLint: strictTypeChecked + stylisticTypeChecked (type-aware linting)
+- All functions must have explicit return types (`@typescript-eslint/explicit-function-return-type`)
+- Use `type` imports for type-only imports (`import type { ... }`)
 - Double quotes, semicolons, 2-space indentation (see .prettierrc)
 - Cloudflare Workers runtime (no Node.js APIs)
 - Use `c.json()` for API responses, always include `{ ok: boolean }`
 - Authentication via Cloudflare Zero Trust (JWT in `Cf-Access-Jwt-Assertion` header)
 - All API routes under `/api/*` with auth middleware applied
+
+## Quality Requirements
+
+- **Coverage minimum: 95%** (statements, branches, functions, lines)
+- All PRs must pass: typecheck, lint, format check, knip, unit tests with coverage
+- No `any` types allowed (`@typescript-eslint/no-explicit-any: error`)
+- No floating promises (`@typescript-eslint/no-floating-promises: error`)
+- Strict boolean expressions required (`@typescript-eslint/strict-boolean-expressions: error`)
 
 ## Type System
 
@@ -49,6 +61,8 @@ npm run d1:migrate:remote # Apply D1 migrations to production
 - Unit tests: Vitest with `@cloudflare/vitest-pool-workers` (runs in Workers runtime)
 - E2E tests: Playwright against local wrangler dev server
 - Test files: `test/**/*.test.ts` (unit), `e2e/**/*.spec.ts` (e2e)
+- Coverage: v8 provider, 95% minimum threshold enforced in CI
+- Coverage reports: text (console), lcov, json-summary
 
 ## Database
 
