@@ -48,6 +48,16 @@
         width: 140px;
         white-space: nowrap;
       }
+      td.actions {
+        width: 100px;
+      }
+      button {
+        padding: 8px 10px;
+        border: 1px solid #ccc;
+        background: #fff;
+        cursor: pointer;
+        border-radius: 8px;
+      }
       .muted {
         color: #666;
         font-size: 12px;
@@ -69,6 +79,7 @@
           <th>期日</th>
           <th>内容</th>
           <th>アーカイブ日時</th>
+          <th>操作</th>
         </tr>
       </thead>
       <tbody id="list"></tbody>
@@ -85,32 +96,63 @@
         );
       }
 
-      async function api(path) {
-        const res = await fetch(path, { cache: "no-store" });
+      async function api(path, options) {
+        const res = await fetch(path, {
+          headers: { "content-type": "application/json" },
+          cache: "no-store",
+          ...options,
+        });
         const data = await res.json().catch(() => ({}));
         if (!res.ok || data.ok === false) throw new Error(data.error || "HTTP " + res.status);
         return data;
       }
 
-      (async () => {
-        try {
-          const data = await api("/api/archive");
-          listEl.innerHTML = "";
-          for (const t of data.tasks || []) {
-            const tr = document.createElement("tr");
-            tr.innerHTML = `
+      function render(tasks) {
+        listEl.innerHTML = "";
+        for (const t of tasks) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
           <td class="due">${esc(t.due_date || "")}</td>
           <td>
             <div>${esc(t.content)}</div>
             <div class="muted">created: ${esc(t.created_at)}</div>
           </td>
-          <td>${esc(t.archived_at || "")}</td>`;
-            listEl.appendChild(tr);
-          }
+          <td>${esc(t.archived_at || "")}</td>
+          <td class="actions">
+            <button data-act="restore" data-id="${esc(t.id)}">復元</button>
+          </td>`;
+          listEl.appendChild(tr);
+        }
+      }
+
+      async function load() {
+        errEl.textContent = "";
+        try {
+          const data = await api("/api/archive");
+          render(data.tasks || []);
         } catch (e) {
           errEl.textContent = e.message;
         }
-      })();
+      }
+
+      listEl.addEventListener("click", async (ev) => {
+        const btn = ev.target.closest("button");
+        if (!btn || btn.getAttribute("data-act") !== "restore") return;
+        const id = btn.getAttribute("data-id");
+
+        btn.disabled = true;
+        errEl.textContent = "";
+        try {
+          await api(`/api/archive/${encodeURIComponent(id)}`, { method: "PUT" });
+          await load();
+        } catch (e) {
+          errEl.textContent = e.message;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      load();
     </script>
   </body>
 </html>
