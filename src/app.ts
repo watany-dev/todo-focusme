@@ -239,5 +239,25 @@ app.get("/api/archive", async (c) => {
   return c.json({ ok: true, tasks: res.results });
 });
 
+/** PUT /api/archive/:id — アーカイブ済みタスクを復元 */
+app.put("/api/archive/:id", async (c) => {
+  const email = c.get("userEmail");
+  const id = c.req.param("id");
+  const t = nowIso();
+
+  const result = await c.env.DB.prepare(
+    `UPDATE tasks SET archived_at = NULL, updated_at = ?1
+     WHERE id = ?2 AND user_email = ?3 AND archived_at IS NOT NULL`,
+  )
+    .bind(t, id, email)
+    .run();
+
+  if (result.meta.changes === 0) {
+    return c.json({ ok: false, error: "task not found" }, 404);
+  }
+
+  return c.json({ ok: true });
+});
+
 export { app };
 export type { AppEnv };
