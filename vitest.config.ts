@@ -3,6 +3,7 @@ import { defineWorkersConfig } from "@cloudflare/vitest-pool-workers/config";
 export default defineWorkersConfig({
   test: {
     passWithNoTests: true,
+    exclude: ["e2e/**", "node_modules/**"],
     coverage: {
       provider: "istanbul",
       enabled: true,
