@@ -163,13 +163,13 @@ database_id = "REPLACE_WITH_YOUR_D1_ID"
     "hono": "^4.7.0"
   },
   "devDependencies": {
-    "@cloudflare/vitest-pool-workers": "^0.8.0",
-    "@cloudflare/workers-types": "^4.20250214.0",
+    "@cloudflare/vitest-pool-workers": "^0.12.18",
+    "@cloudflare/workers-types": "^4.20260305.0",
     "@vitest/coverage-istanbul": "^3.2.4",
     "eslint": "^9.21.0",
     "typescript": "^5.5.4",
     "vitest": "^3.0.0",
-    "wrangler": "^3.100.0"
+    "wrangler": "^4.69.0"
   }
 }
 ```
