@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler pages dev ./public --d1 DB=todo_db",
+    "dev": "wrangler pages dev ./public",
     "deploy": "wrangler pages deploy ./public",
     "d1:create": "wrangler d1 create todo_db",
     "d1:migrate": "wrangler d1 migrations apply todo_db --local",
