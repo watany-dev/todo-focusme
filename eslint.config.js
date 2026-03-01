@@ -4,7 +4,7 @@ import eslintConfigPrettier from "eslint-config-prettier";
 
 export default tseslint.config(
   {
-    ignores: [".wrangler/", "node_modules/", "public/"],
+    ignores: [".wrangler/", "node_modules/", "public/", "coverage/"],
   },
   js.configs.recommended,
   ...tseslint.configs.strictTypeChecked,
