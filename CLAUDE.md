@@ -13,6 +13,7 @@ Stack: Hono + Cloudflare Pages Functions + D1 (SQLite) + Vanilla JS frontend.
 - `functions/[[route]].ts` - Pages Functions catch-all entry point
 - `public/` - Static HTML/JS frontend (served by Cloudflare Pages)
 - `migrations/` - D1 SQL migration files
+- `test/` - Unit tests (Vitest + cloudflare vitest pool workers)
 
 ## Common Commands
 
@@ -94,7 +95,7 @@ Cloudflare のエッジインフラだけで動く、ほぼ無料の個人用 To
 - Unit tests: Vitest with `@cloudflare/vitest-pool-workers` (runs in Workers runtime)
 - E2E tests: Playwright against local wrangler dev server
 - Test files: `test/**/*.test.ts` (unit), `e2e/**/*.spec.ts` (e2e)
-- Coverage: v8 provider, 95% minimum threshold enforced in CI
+- Coverage: istanbul provider (v8 incompatible with Workers runtime), 95% minimum threshold enforced in CI
 - Coverage reports: text (console), lcov, json-summary
 
 ## Database
